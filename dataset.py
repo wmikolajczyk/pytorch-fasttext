@@ -1,6 +1,8 @@
 import logging
+import os
 import random
 from collections import defaultdict
+from typing import Dict, List
 
 import nltk
 import torch
@@ -30,7 +32,6 @@ TODO:
 - cut top N ngrams
 """
 
-
 # https://github.com/n0obcoder/Skip-Gram-Model-PyTorch
 # https://www.kaggle.com/karthur10/skip-gram-implementation-with-pytorch-step-by-step
 # https://towardsdatascience.com/implementing-word2vec-in-pytorch-skip-gram-model-e6bae040d2fb
@@ -44,52 +45,86 @@ class Word2VecDataset(Dataset):
     dataset with transformation: https://git.egnyte-internal.com/datalab/doc-classifier-bert/-/blob/master/boilerplate/datasets.py
     """
 
-    def __init__(self, context_size: int):
+    def __init__(self, context_size: int, negative_samples_count: int = 2):
         import gensim.downloader as api
 
         raw_dataset = api.load("text8")  # load as Dataset object (iterator)
-        # limit dataset to speed up development - TODO - remove limiting
-        raw_dataset = [x for x in raw_dataset][:100]
+        # limit dataset to speed up development
+        raw_dataset = [x for x in raw_dataset]
 
         en_stop_words = stopwords.words("english")
         clean_dataset, word_freqs = self.preprocess_text(raw_dataset, en_stop_words)
-        word_to_idx = {w: i for i, w in enumerate(word_freqs)}
+        ##
+        words_limit = 20000
+        top_words = [
+            el[0]
+            for el in sorted(
+                word_freqs.items(), key=lambda key_val: key_val[1], reverse=True
+            )[:words_limit]
+        ]
+        ##
+        word_to_idx = {w: i for i, w in enumerate(top_words)}
+        word_to_idx["<UNKNOWN>"] = len(word_to_idx)
 
         # word_ngrams = self.prepare_word_ngrams(
         #     list(word_freqs.keys()), ngram_len=ngram_len
         # )
         # ngrams_occurences = self.count_ngrams_occurences(word_freqs, word_ngrams)
         # top_ngrams = ngrams_occurences[:top_ngrams]
-        training_data = self.prepare_training_data(
-            clean_dataset,
-            word_to_idx,
-            context_size=context_size,
-            negative_samples_count=2,
-        )
+        training_data_path = "training_data"
+        if not os.path.exists(training_data_path):
+            logger.info(f"no {training_data_path}")
+            training_data = self.prepare_training_data(
+                clean_dataset,
+                word_to_idx,
+                context_size=context_size,
+            )
+            training_data = torch.tensor(training_data)
+            torch.save(training_data, training_data_path)
+        else:
+            logger.info(f"loading training data from {training_data_path}")
+            training_data = torch.load(training_data_path)
 
-        self.word_freqs = word_freqs
-        self.data = torch.tensor(training_data)
+        self.word_to_idx = word_to_idx
+        self.data = training_data
+        self.negative_samples_count = negative_samples_count
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, index):
         """
+        [central_word, pos_word, 1]
+
+
         [
             [central_word, pos_word, 1],
             [central_word, neg_word1, 0],
             [central_word, neg_word2, 0]
         ]
+
+        [central_words, context_word, [random_word1, random_word2, ...]]
+        [central_words, [contexted_words, ...], [negative_words, ...]]
         """
         # ['<wh', 'whe', 'her', 'ere', 're>', '<where>'] -> [0, 23, 51, 25, 23] (indices of ngrams)
         # ['<wh', 'whe', 'her', 'ere', 're>', '<where>']
         # tensor of long values - indices of ngrams
 
+        # get one context pair
+        # get N non-context pairs
+
+        word_indexes = list(self.word_to_idx.values())
+
         central_word = self.data[index, 0]
         context_word = self.data[index, 1]
-        is_positive = self.data[index, 2]
+        random_words = random.sample(word_indexes, self.negative_samples_count)
 
-        return central_word, context_word, is_positive
+        data = [[central_word, context_word, 1]]
+        # TODO: while loop - to avoid central / context words
+        for word_idx in random_words:
+            data.append([central_word, word_idx, 0])
+
+        return torch.tensor(data, dtype=torch.long)
 
     def preprocess_text(self, raw_dataset, en_stop_words):
         """Preprocess text and gather word frequencies"""
@@ -128,8 +163,8 @@ class Word2VecDataset(Dataset):
 
     def count_ngrams_occurences(
         self,
-        word_freqs: dict[str, int],
-        word_ngrams: dict[str, list],
+        word_freqs: Dict[str, int],
+        word_ngrams: Dict[str, list],
         sort: bool = True,
     ):
         ngram_occurences = defaultdict(int)
@@ -149,16 +184,14 @@ class Word2VecDataset(Dataset):
 
     def prepare_training_data(
         self,
-        clean_dataset: list[list[str]],
-        word_to_idx: dict[str, int],
+        clean_dataset: List[List[str]],
+        word_to_idx: Dict[str, int],
         context_size: int,
-        negative_samples_count: int,
     ):
         """Prepare context word positive and negative pairs"""
-        # consists of [word, context_word, is_context] where is_context is 0 or 1
+        # consists of positive examples [word, context_word]
         context_pairs = []
 
-        words_list = list(word_to_idx.keys())
         for article in tqdm(clean_dataset):
             for word_idx in range(len(article)):
                 min_idx = max(word_idx - context_size, 0)
@@ -167,24 +200,17 @@ class Word2VecDataset(Dataset):
                     # skip current word
                     if context_word_idx == word_idx:
                         continue
+
                     context_pairs.append(
                         [
-                            word_to_idx[article[word_idx]],
-                            word_to_idx[article[context_word_idx]],
-                            1,
+                            word_to_idx.get(
+                                article[word_idx], word_to_idx["<UNKNOWN>"]
+                            ),
+                            word_to_idx.get(
+                                article[context_word_idx], word_to_idx["<UNKNOWN>"]
+                            ),
                         ]
                     )
-                    # add N negative pairs - each call - negative samples for idx 0 - should return different values
-                    #   for now keep this code here - if we want to change it, change seed here
-                    for i in range(negative_samples_count):
-                        random_word = random.choice(words_list)
-                        context_pairs.append(
-                            [
-                                word_to_idx[article[word_idx]],
-                                word_to_idx[random_word],
-                                0,
-                            ]
-                        )
         return context_pairs
 
 
