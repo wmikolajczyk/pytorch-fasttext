@@ -94,33 +94,33 @@ class Word2VecDataset(Dataset):
 
     def __getitem__(self, index):
         """
-        [central_word, pos_word, 1]
-
-
+        Returns one positive pair (central and context word)
+        and <negative_samples_count> negative pairs
         [
             [central_word, pos_word, 1],
             [central_word, neg_word1, 0],
             [central_word, neg_word2, 0]
         ]
-
-        [central_words, context_word, [random_word1, random_word2, ...]]
-        [central_words, [contexted_words, ...], [negative_words, ...]]
         """
         # ['<wh', 'whe', 'her', 'ere', 're>', '<where>'] -> [0, 23, 51, 25, 23] (indices of ngrams)
         # ['<wh', 'whe', 'her', 'ere', 're>', '<where>']
         # tensor of long values - indices of ngrams
 
-        # get one context pair
-        # get N non-context pairs
-
-        word_indexes = list(self.word_to_idx.values())
-
+        # central word on index 0 and context word on index 1
         central_word = self.data[index, 0]
         context_word = self.data[index, 1]
-        random_words = random.sample(word_indexes, self.negative_samples_count)
-
+        # list of word indexes to sample negative examples from
+        non_context_word_indexes = [
+            word_index
+            for word_index in self.word_to_idx.values()
+            if word_index not in [central_word, context_word]
+        ]
+        random_words = random.sample(
+            non_context_word_indexes, self.negative_samples_count
+        )
+        # add positive pair
         data = [[central_word, context_word, 1]]
-        # TODO: while loop - to avoid central / context words
+        # add negative pairs
         for word_idx in random_words:
             data.append([central_word, word_idx, 0])
 
