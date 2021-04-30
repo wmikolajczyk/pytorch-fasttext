@@ -19,22 +19,14 @@ random.seed(93)  # for reproducibility
 
 """
 TODO:
-- remove dataset limiting
-- preprocess dataset
-- allow loading preprocessed dataset!
-- add negative sampling to getitem method (to select different negative examples each time for index 0)
-- refactor code
-- check if model is training
-
-
-- support Ngrams
+- support Ngrams (change skip gram to ngrams -> fasttext)
 - calculate ngram frequencies
 - cut top N ngrams
-"""
 
 # https://github.com/n0obcoder/Skip-Gram-Model-PyTorch
 # https://www.kaggle.com/karthur10/skip-gram-implementation-with-pytorch-step-by-step
 # https://towardsdatascience.com/implementing-word2vec-in-pytorch-skip-gram-model-e6bae040d2fb
+"""
 
 
 class Word2VecDataset(Dataset):
@@ -62,7 +54,6 @@ class Word2VecDataset(Dataset):
                 word_freqs.items(), key=lambda key_val: key_val[1], reverse=True
             )[:words_limit]
         ]
-        ##
         word_to_idx = {w: i for i, w in enumerate(top_words)}
         word_to_idx["<UNKNOWN>"] = len(word_to_idx)
 
@@ -110,14 +101,21 @@ class Word2VecDataset(Dataset):
         central_word = self.data[index, 0]
         context_word = self.data[index, 1]
         # list of word indexes to sample negative examples from
-        non_context_word_indexes = [
-            word_index
-            for word_index in self.word_to_idx.values()
-            if word_index not in [central_word, context_word]
-        ]
-        random_words = random.sample(
-            non_context_word_indexes, self.negative_samples_count
-        )
+        # non_context_word_indexes = [
+        #     word_index
+        #     for word_index in self.word_to_idx.values()
+        #     if word_index not in [central_word, context_word]
+        # ]
+        # word_indexes = list(self.word_to_idx.values())
+        max_word_index = len(self.word_to_idx)
+        random_words = []
+        sampled_word_index = random.randint(0, max_word_index - 1)
+        while len(random_words) < self.negative_samples_count:
+            # sets are implemented as hash tables, O(1) lookup
+            if sampled_word_index not in {central_word, context_word}:
+                random_words.append(sampled_word_index)
+            sampled_word_index = random.randint(0, max_word_index - 1)
+
         # add positive pair
         data = [[central_word, context_word, 1]]
         # add negative pairs
@@ -212,8 +210,3 @@ class Word2VecDataset(Dataset):
                         ]
                     )
         return context_pairs
-
-
-# training loop with negative examples
-# 1. implement skip gram model
-# 2. change skip gram to ngrams -> fasttext

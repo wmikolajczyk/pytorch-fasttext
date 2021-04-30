@@ -40,10 +40,6 @@ logger.info("starting training")
 for epoch in range(config["num_epochs"]):
     tqdm_bar = tqdm(train_loader)
     for i, batch in enumerate(tqdm_bar):
-        #         reshaped_batch = batch.view(
-        #             config["batch_size"] * (1 + train_dataset.negative_samples_count),
-        #             (1 + train_dataset.negative_samples_count),
-        #         ).to(device)
         reshaped_batch = batch.view(
             batch.shape[0] * (1 + train_dataset.negative_samples_count),
             (1 + train_dataset.negative_samples_count),
