@@ -1,2 +1,4 @@
 # pytorch-fasttext
-fastText embeddings training in PyTorch
+This is (WIP) fastText (https://fasttext.cc/) embeddings training in PyTorch
+
+Currently skip-gram model is implemented -> TODO: change skip-gram to n-gram :)
